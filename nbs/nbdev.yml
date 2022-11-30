@@ -2,8 +2,8 @@ project:
   output-dir: _docs
 
 website:
-  title: "pytorch_educative"
-  site-url: "https://nesaboz.github.io/pytorch_educative"
+  title: "pytorched"
+  site-url: "https://nesaboz.github.io/pytorched"
   description: "Following pytorch educative course (https://www.educative.io/courses/deep-learning-pytorch-fundamentals)"
   repo-branch: main
-  repo-url: "https://github.com/nesaboz/pytorch_educative"
+  repo-url: "https://github.com/nesaboz/pytorched"
