@@ -3,3 +3,11 @@ website:
     contents:
       - index.ipynb
       - 00_core.ipynb
+      - 1_linear_regression.ipynb
+      - 1_linear_regression_rewrite.ipynb
+      - 2_binary_clasification.ipynb
+      - Challenges01_question.ipynb
+      - Challenges02_question.ipynb
+      - Challenges03_question.ipynb
+      - Challenges04_question.ipynb
+      - Challenges05_question.ipynb

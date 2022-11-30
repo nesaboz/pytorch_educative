@@ -3,7 +3,6 @@
 # %% auto 0
 __all__ = ['foo']
 
-
 # %% ../nbs/00_core.ipynb 4
 def foo():
 	print('Aloha')
