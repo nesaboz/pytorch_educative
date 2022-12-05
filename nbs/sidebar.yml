@@ -2,12 +2,6 @@ website:
   sidebar:
     contents:
       - index.ipynb
-      - 00_core.ipynb
-      - 1_linear_regression.ipynb
-      - 1_linear_regression_rewrite.ipynb
-      - 2_binary_clasification.ipynb
-      - Challenges01_question.ipynb
-      - Challenges02_question.ipynb
-      - Challenges03_question.ipynb
-      - Challenges04_question.ipynb
-      - Challenges05_question.ipynb
+      - 01_linear_regression.ipynb
+      - 02_quadratic_function_fit.ipynb
+      - 03_binary_classification.ipynb
