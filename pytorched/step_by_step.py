@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
+import torch.nn as nn
 
 
 class StepByStep(object):
@@ -32,6 +33,8 @@ class StepByStep(object):
 
         self.losses = []
         self.val_losses = []
+
+        self.pera = 0
 
     def __str__(self):
         return f"{self.model}, {self.optimizer}, {self.loss_fn}"
@@ -131,3 +134,46 @@ class StepByStep(object):
 
         self.losses = checkpoint['losses']
         self.val_losses = checkpoint['val_losses']
+
+    def correct(self, x, y, threshold=.5):
+        self.model.eval()
+        yhat = self.model(x.to(self.device))
+        y = y.to(self.device)
+        self.model.train()
+
+        # We get the size of the batch and the number of classes
+        # (only 1, if it is binary)
+        n_samples, n_dims = yhat.shape
+        if n_dims > 1:
+            # In a multiclass classification, the biggest logit
+            # always wins, so we don't bother getting probabilities
+
+            # This is PyTorch's version of argmax,
+            # but it returns a tuple: (max value, index of max value)
+            _, predicted = torch.max(yhat, 1)
+        else:
+            n_dims += 1
+            # In binary classification, if last layer is not Sigmoid we need to apply one:
+            if not (isinstance(self.model, nn.Sequential) and isinstance(self.model[-1], nn.Sigmoid)):
+                yhat = torch.sigmoid(yhat)
+            predicted = (yhat > threshold).long()
+
+        # How many samples got classified correctly for each class
+        result = []
+        for c in range(n_dims):
+            n_class = (y == c).sum().item()
+            n_correct = (predicted[y == c] == c).sum().item()
+            result.append((n_correct, n_class))
+        return torch.tensor(result)
+
+    @staticmethod
+    def loader_apply(loader, func, reduce='sum'):
+        results = [func(x, y) for i, (x, y) in enumerate(loader)]
+        results = torch.stack(results, axis=0)
+
+        if reduce == 'sum':
+            results = results.sum(axis=0)
+        elif reduce == 'mean':
+            results = results.float().mean(axis=0)
+
+        return results
