@@ -2,6 +2,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
+import datetime
+from torch.utils.tensorboard import SummaryWriter
+
+RUNS_FOLDER_NAME = 'runs'
 
 
 class StepByStep(object):
@@ -28,6 +32,7 @@ class StepByStep(object):
 
         self.train_loader = None
         self.val_loader = None
+        self.writer = None
 
         self.total_epochs = 0
 
@@ -78,6 +83,11 @@ class StepByStep(object):
         self.device = device
         self.model.to(self.device)
 
+    def set_tensorboard(self, name, folder=RUNS_FOLDER_NAME):
+        # This method allows the user to define a SummaryWriter to interface with TensorBoard
+        suffix = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
+        self.writer = SummaryWriter(f'{folder}/{name}_{suffix}')
+
     def train(self, n_epochs):
 
         self.set_seed()
@@ -87,13 +97,25 @@ class StepByStep(object):
             train_losses = []
             for batch_x, batch_y in self.train_loader:
                 train_losses.append(self.perform_train_step(batch_x, batch_y))
-            self.losses.append(np.mean(train_losses))
+            mini_batch_loss = np.mean(train_losses)
+            self.losses.append(mini_batch_loss)
 
             with torch.no_grad():
                 val_losses = []
                 for batch_x, batch_y in self.val_loader:
                     val_losses.append(self.perform_val_step(batch_x, batch_y))
-                self.val_losses.append(np.mean(val_losses))
+                mini_batch_val_loss = np.mean(val_losses)
+                self.val_losses.append(mini_batch_val_loss)
+
+            # If a SummaryWriter has been set...
+            if self.writer:
+                scalars = {'training': mini_batch_loss}
+                if mini_batch_val_loss is not None:
+                    scalars.update({'validation': mini_batch_val_loss})
+                # Records both losses for each epoch under the main tag "loss"
+                self.writer.add_scalars(main_tag='loss',
+                                        tag_scalar_dict=scalars,
+                                        global_step=epoch)
 
     def predict(self, x):
         self.model.eval()
@@ -134,6 +156,8 @@ class StepByStep(object):
 
         self.losses = checkpoint['losses']
         self.val_losses = checkpoint['val_losses']
+
+        self.model.train()
 
     def correct(self, x, y, threshold=.5):
         self.model.eval()
