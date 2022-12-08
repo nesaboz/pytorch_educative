@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import datetime
 from torch.utils.tensorboard import SummaryWriter
+import random
 
 RUNS_FOLDER_NAME = 'runs'
 
@@ -46,11 +47,6 @@ class StepByStep(object):
 
     __repr__ = __str__
 
-    def set_seed(self, seed=42):
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
-        torch.manual_seed(seed)
-        np.random.seed(seed)
 
     def set_loaders(self, train_loader, val_loader):
         self.train_loader = train_loader
@@ -201,3 +197,26 @@ class StepByStep(object):
             results = results.float().mean(axis=0)
 
         return results
+
+    def set_seed(self, seed=42):
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        random.seed(seed)
+        try:
+            self.train_loader.sampler.generator.manual_seed(seed)
+        except AttributeError:
+            pass
+
+    def count_parameters(self):
+        return sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+
+    def reset_parameters(self):
+        """
+        CAUTION this does not reset all parameters like in nn.PReLU for example.
+        Based on https://stackoverflow.com/questions/63627997/reset-parameters-of-a-neural-network-in-pytorch
+        """
+        for layer in self.model.modules():
+            if hasattr(layer, 'reset_parameters'):
+                layer.reset_parameters()
