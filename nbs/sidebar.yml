@@ -6,4 +6,3 @@ website:
       - 02_quadratic_function_fit.ipynb
       - 03_binary_classification.ipynb
       - 04_binary_image_classification.ipynb
-      - 05_rock_paper_scissors.ipynb
