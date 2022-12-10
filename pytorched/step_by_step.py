@@ -4,9 +4,28 @@ import torch
 import torch.nn as nn
 import datetime
 from torch.utils.tensorboard import SummaryWriter
+from torchvision.transforms import Normalize
 import random
+from tqdm import tqdm
+from copy import deepcopy
+from torch.optim.lr_scheduler import LambdaLR
+
 
 RUNS_FOLDER_NAME = 'runs'
+
+
+def make_lr_fn(start_lr, end_lr, num_iter, step_mode='exp'):
+    if step_mode == 'linear':
+        factor = (end_lr / start_lr - 1) / num_iter
+
+        def lr_fn(iteration):
+            return 1 + iteration * factor
+    else:
+        factor = (np.log(end_lr) - np.log(start_lr)) / num_iter
+
+        def lr_fn(iteration):
+            return np.exp(factor) ** iteration
+    return lr_fn
 
 
 class StepByStep(object):
@@ -22,6 +41,7 @@ class StepByStep(object):
     """
 
     def __init__(self, model, optimizer, loss_fn):
+        super(StepByStep, self).__init__()
 
         self.model = model
         self.optimizer = optimizer
@@ -88,7 +108,7 @@ class StepByStep(object):
 
         self.set_seed()
 
-        for epoch in range(n_epochs):
+        for epoch in tqdm(range(n_epochs)):
             self.total_epochs += 1
             train_losses = []
             for batch_x, batch_y in self.train_loader:
@@ -394,3 +414,153 @@ class StepByStep(object):
         correct, total = a.sum(axis=0)
         accuracy = round(float((correct / total * 100.).cpu().numpy()), 2)
         return accuracy
+
+    @staticmethod
+    def statistics_per_channel(images, labels):
+        # NCHW
+        n_samples, n_channels, n_height, n_weight = images.size()
+        # Flatten HW into a single dimension
+        flatten_per_channel = images.reshape(n_samples, n_channels, -1)
+
+        # Computes statistics of each image per channel
+        # Average pixel value per channel
+        # (n_samples, n_channels)
+        means = flatten_per_channel.mean(axis=2)
+        # Standard deviation of pixel values per channel
+        # (n_samples, n_channels)
+        stds = flatten_per_channel.std(axis=2)
+
+        # Adds up statistics of all images in a mini-batch
+        # (1, n_channels)
+        sum_means = means.sum(axis=0)
+        sum_stds = stds.sum(axis=0)
+        # Makes a tensor of shape (1, n_channels)
+        # with the number of samples in the mini-batch
+        n_samples = torch.tensor([n_samples] * n_channels).float()
+
+        # Stack the three tensors on top of one another
+        # (3, n_channels)
+        return torch.stack([n_samples, sum_means, sum_stds], axis=0)
+
+    @staticmethod
+    def make_normalizer(loader):
+        total_samples, total_means, total_stds = StepByStep.loader_apply(loader, StepByStep.statistics_per_channel)
+        norm_mean = total_means / total_samples
+        norm_std = total_stds / total_samples
+        return Normalize(mean=norm_mean, std=norm_std)
+
+    def lr_range_test(self, data_loader, end_lr, num_iter=100, step_mode='exp', alpha=0.05, ax=None):
+        # Since the test updates both model and optimizer we need to store
+        # their initial states to restore them in the end
+        previous_states = {'model': deepcopy(self.model.state_dict()),
+                           'optimizer': deepcopy(self.optimizer.state_dict())}
+        # Retrieves the learning rate set in the optimizer
+        start_lr = self.optimizer.state_dict()['param_groups'][0]['lr']
+
+        # Builds a custom function and corresponding scheduler
+        lr_fn = make_lr_fn(start_lr, end_lr, num_iter)
+        scheduler = LambdaLR(self.optimizer, lr_lambda=lr_fn)
+
+        # Variables for tracking results and iterations
+        tracking = {'loss': [], 'lr': []}
+        iteration = 0
+
+        # If there are more iterations than mini-batches in the data loader,
+        # it will have to loop over it more than once
+        while (iteration < num_iter):
+            # That's the typical mini-batch inner loop
+            for x_batch, y_batch in data_loader:
+                x_batch = x_batch.to(self.device)
+                y_batch = y_batch.to(self.device)
+                # Step 1
+                yhat = self.model(x_batch)
+                # Step 2
+                loss = self.loss_fn(yhat, y_batch)
+                # Step 3
+                loss.backward()
+
+                # Here we keep track of the losses (smoothed)
+                # and the learning rates
+                tracking['lr'].append(scheduler.get_last_lr()[0])
+                if iteration == 0:
+                    tracking['loss'].append(loss.item())
+                else:
+                    prev_loss = tracking['loss'][-1]
+                    smoothed_loss = alpha * loss.item() + (1 - alpha) * prev_loss
+                    tracking['loss'].append(smoothed_loss)
+
+                iteration += 1
+                # Number of iterations reached
+                if iteration == num_iter:
+                    break
+
+                # Step 4
+                self.optimizer.step()
+                scheduler.step()
+                self.optimizer.zero_grad()
+
+        # Restores the original states
+        self.optimizer.load_state_dict(previous_states['optimizer'])
+        self.model.load_state_dict(previous_states['model'])
+
+        if ax is None:
+            fig, ax = plt.subplots(1, 1, figsize=(6, 4))
+        else:
+            fig = ax.get_figure()
+        ax.plot(tracking['lr'], tracking['loss'])
+        if step_mode == 'exp':
+            ax.set_xscale('log')
+        ax.set_xlabel('Learning Rate')
+        ax.set_ylabel('Loss')
+        fig.tight_layout()
+        return tracking, fig
+
+    def set_optimizer(self, optimizer):
+        self.optimizer = optimizer
+
+    def capture_gradients(self, layers_to_hook):
+        if not isinstance(layers_to_hook, list):
+            layers_to_hook = [layers_to_hook]
+
+        modules = list(self.model.named_modules())
+        self._gradients = {}
+
+        def make_log_fn(name, parm_id):
+            def log_fn(grad):
+                self._gradients[name][parm_id].append(grad.tolist())
+                return
+
+            return log_fn
+
+        for name, layer in self.model.named_modules():
+            if name in layers_to_hook:
+                self._gradients.update({name: {}})
+                for parm_id, p in layer.named_parameters():
+                    if p.requires_grad:
+                        self._gradients[name].update({parm_id: []})
+                        log_fn = make_log_fn(name, parm_id)
+                        self.handles[f'{name}.{parm_id}.grad'] = p.register_hook(log_fn)
+        return
+
+    def capture_parameters(self, layers_to_hook):
+        if not isinstance(layers_to_hook, list):
+            layers_to_hook = [layers_to_hook]
+
+        modules = list(self.model.named_modules())
+        layer_names = {layer: name for name, layer in modules}
+
+        self._parameters = {}
+
+        for name, layer in modules:
+            if name in layers_to_hook:
+                self._parameters.update({name: {}})
+                for parm_id, p in layer.named_parameters():
+                    self._parameters[name].update({parm_id: []})
+
+        def fw_hook_fn(layer, inputs, outputs):
+            name = layer_names[layer]
+            for parm_id, parameter in layer.named_parameters():
+                self._parameters[name][parm_id].append(parameter.tolist())
+
+        self.attach_hooks(layers_to_hook, fw_hook_fn)
+        return
