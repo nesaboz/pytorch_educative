@@ -9,6 +9,7 @@ import random
 from tqdm import tqdm
 from copy import deepcopy
 from torch.optim.lr_scheduler import LambdaLR
+import torch.optim as optim
 
 
 RUNS_FOLDER_NAME = 'runs'
@@ -54,11 +55,14 @@ class StepByStep(object):
         self.train_loader = None
         self.val_loader = None
         self.writer = None
+        self.scheduler = None
+        self.is_batch_lr_scheduler = False
 
         self.total_epochs = 0
 
         self.losses = []
         self.val_losses = []
+        self.learning_rates = []
 
         self.visualization = {}
         self.handles = {}
@@ -122,6 +126,8 @@ class StepByStep(object):
                     val_losses.append(self.perform_val_step(batch_x, batch_y))
                 mini_batch_val_loss = np.mean(val_losses)
                 self.val_losses.append(mini_batch_val_loss)
+
+            self._epoch_schedulers(mini_batch_val_loss)
 
             # If a SummaryWriter has been set...
             if self.writer:
@@ -452,8 +458,9 @@ class StepByStep(object):
     def lr_range_test(self, data_loader, end_lr, num_iter=100, step_mode='exp', alpha=0.05, ax=None):
         # Since the test updates both model and optimizer we need to store
         # their initial states to restore them in the end
-        previous_states = {'model': deepcopy(self.model.state_dict()),
-                           'optimizer': deepcopy(self.optimizer.state_dict())}
+        previous_states = {'model': deepcopy(self.model).state_dict(),
+                           'optimizer': deepcopy(self.optimizer).state_dict()}
+
         # Retrieves the learning rate set in the optimizer
         start_lr = self.optimizer.state_dict()['param_groups'][0]['lr']
 
@@ -564,3 +571,37 @@ class StepByStep(object):
 
         self.attach_hooks(layers_to_hook, fw_hook_fn)
         return
+
+    def set_lr_scheduler(self, scheduler):
+        # Makes sure the scheduler in the argument is assigned to the
+        # optimizer we're using in this class
+        if scheduler.optimizer == self.optimizer:
+            self.scheduler = scheduler
+            if (isinstance(scheduler, optim.lr_scheduler.CyclicLR) or
+                    isinstance(scheduler, optim.lr_scheduler.OneCycleLR) or
+                    isinstance(scheduler, optim.lr_scheduler.CosineAnnealingWarmRestarts)):
+                self.is_batch_lr_scheduler = True
+            else:
+                self.is_batch_lr_scheduler = False
+
+    def _epoch_schedulers(self, val_loss):
+        if self.scheduler:
+            if not self.is_batch_lr_scheduler:
+                if isinstance(self.scheduler, optim.lr_scheduler.ReduceLROnPlateau):
+                    self.scheduler.step(val_loss)
+                else:
+                    self.scheduler.step()
+
+                current_lr = list(map(lambda d: d['lr'], self.scheduler.optimizer.state_dict()['param_groups']))
+                self.learning_rates.append(current_lr)
+
+    def _mini_batch_schedulers(self, frac_epoch):
+        if self.scheduler:
+            if self.is_batch_lr_scheduler:
+                if isinstance(self.scheduler, optim.lr_scheduler.CosineAnnealingWarmRestarts):
+                    self.scheduler.step(self.total_epochs + frac_epoch)
+                else:
+                    self.scheduler.step()
+
+                current_lr = list(map(lambda d: d['lr'], self.scheduler.optimizer.state_dict()['param_groups']))
+                self.learning_rates.append(current_lr)
