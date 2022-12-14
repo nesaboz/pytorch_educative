@@ -605,3 +605,58 @@ class StepByStep(object):
 
                 current_lr = list(map(lambda d: d['lr'], self.scheduler.optimizer.state_dict()['param_groups']))
                 self.learning_rates.append(current_lr)
+
+    def print_trainable_parameters(self):
+        for name, param in self.model.named_parameters():
+            if param.requires_grad:
+                print(name)
+
+    def unfreeze_model(self):
+        for parameter in self.model.parameters():
+            parameter.requires_grad = True
+
+    def freeze_model(self):
+        for parameter in self.model.parameters():
+            parameter.requires_grad = False
+
+
+def compare_optimizers(model, loss_fn, optimizers, train_loader, val_loader=None, schedulers=None, layers_to_hook='', n_epochs=50):
+    results = {}
+    model_state = deepcopy(model).state_dict()
+
+    for desc, opt in optimizers.items():
+        model.load_state_dict(model_state)
+
+        optimizer = opt['class'](model.parameters(), **opt['parms'])
+
+        sbs = StepByStep(model, loss_fn, optimizer)
+        sbs.set_loaders(train_loader, val_loader)
+
+        try:
+            if schedulers is not None:
+                sched = schedulers[desc]
+                scheduler = sched['class'](optimizer, **sched['parms'])
+                sbs.set_lr_scheduler(scheduler)
+        except KeyError:
+            pass
+
+        sbs.capture_parameters(layers_to_hook)
+        sbs.capture_gradients(layers_to_hook)
+        sbs.train(n_epochs)
+        sbs.remove_hooks()
+
+        parms = deepcopy(sbs._parameters)
+        grads = deepcopy(sbs._gradients)
+
+        lrs = sbs.learning_rates[:]
+        if not len(lrs):
+            lrs = [list(map(lambda p: p['lr'], optimizer.state_dict()['param_groups']))] * n_epochs
+
+        results.update({desc: {'parms': parms,
+                               'grads': grads,
+                               'losses': np.array(sbs.losses),
+                               'val_losses': np.array(sbs.val_losses),
+                               'state': optimizer.state_dict(),
+                               'lrs': lrs}})
+
+    return results
