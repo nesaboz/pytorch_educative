@@ -10,6 +10,8 @@ from tqdm import tqdm
 from copy import deepcopy
 from torch.optim.lr_scheduler import LambdaLR
 import torch.optim as optim
+from torchviz import make_dot
+from torch.utils.data import TensorDataset
 
 
 RUNS_FOLDER_NAME = 'runs'
@@ -415,9 +417,12 @@ class StepByStep(object):
         return fig
 
     @property
+    def accuracy_per_class(self):
+        return self.loader_apply(self.val_loader, self.correct)
+
+    @property
     def accuracy(self):
-        a = self.loader_apply(self.val_loader, self.correct)
-        correct, total = a.sum(axis=0)
+        correct, total = self.accuracy_per_class.sum(axis=0)
         accuracy = round(float((correct / total * 100.).cpu().numpy()), 2)
         return accuracy
 
@@ -607,9 +612,11 @@ class StepByStep(object):
                 self.learning_rates.append(current_lr)
 
     def print_trainable_parameters(self):
-        for name, param in self.model.named_parameters():
-            if param.requires_grad:
-                print(name)
+        names = [name for name, param in self.model.named_parameters() if param.requires_grad]
+        if names:
+            print("\n".join(names))
+        else:
+            print('No trainable parameters.')
 
     def unfreeze_model(self):
         for parameter in self.model.parameters():
@@ -618,6 +625,35 @@ class StepByStep(object):
     def freeze_model(self):
         for parameter in self.model.parameters():
             parameter.requires_grad = False
+
+    def make_dot(self):
+        x, y = next(iter(self.val_loader))
+
+        self.model.eval()
+        x = x.to(self.device)
+        output = self.model(x)
+        dot = make_dot(output)
+        dot.render('inception')
+
+
+def preprocessed_dataset(model, loader, device=None):
+    """
+    Runs all data in the loader through the model and returns a dataset.
+    """
+
+    features = torch.Tensor()
+    labels = torch.Tensor().type(torch.long)
+
+    if device is None:
+        device = next(model.parameters()).device
+
+    for i, (x_batch, y_batch) in enumerate(loader):
+        model.eval()
+        output = model(x_batch.to(device))
+        features = torch.cat([features, output.detach().cpu()])
+        labels = torch.cat([labels, y_batch.cpu()])
+
+    return TensorDataset(features, labels)
 
 
 def compare_optimizers(model, loss_fn, optimizers, train_loader, val_loader=None, schedulers=None, layers_to_hook='', n_epochs=50):
