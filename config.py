@@ -26,10 +26,10 @@ except ModuleNotFoundError:
 IS_LOCAL = not IS_COLAB
 
 
-def download_to_colab(project_name, branch='master'):
-    root_url = 'https://github.com/nesaboz/pytorched/tree/{}'.format(branch)
+def download_to_colab(project_name, branch='main'):
+    root_url = 'https://raw.githubusercontent.com/nesaboz/pytorched/{}'.format(branch)
 
-    for filepath in FILEPATHS:
+    for filepath in FILEPATHS[project_name]:
         folder, filename = os.path.split(filepath)
         os.makedirs(folder, exist_ok=True)
         url = os.path.join(root_url, filepath)
@@ -37,7 +37,7 @@ def download_to_colab(project_name, branch='master'):
         open(filepath, 'wb').write(r.content)
 
 
-def config_project(name, branch='master'):
+def config_project(name, branch='main'):
     if IS_COLAB:
         print('Downloading files from GitHub repo to Colab...')
         download_to_colab(name, branch)
