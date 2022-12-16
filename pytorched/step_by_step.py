@@ -96,6 +96,9 @@ class StepByStep(object):
     def perform_val_step(self, batch_x, batch_y):
         self.model.eval()
 
+        batch_x = batch_x.to(self.device)
+        batch_y = batch_y.to(self.device)
+
         predictions = self.model(batch_x)
         loss = self.loss_fn(predictions, batch_y)
 
