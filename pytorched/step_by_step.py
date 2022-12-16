@@ -624,14 +624,6 @@ class StepByStep(object):
         else:
             print('No trainable parameters.')
 
-    def unfreeze_model(self):
-        for parameter in self.model.parameters():
-            parameter.requires_grad = True
-
-    def freeze_model(self):
-        for parameter in self.model.parameters():
-            parameter.requires_grad = False
-
     def make_dot(self):
         x, y = next(iter(self.val_loader))
 
@@ -660,6 +652,16 @@ def preprocessed_dataset(model, loader, device=None):
         labels = torch.cat([labels, y_batch.cpu()])
 
     return TensorDataset(features, labels)
+
+
+def unfreeze_model(model):
+    for parameter in model.parameters():
+        parameter.requires_grad = True
+
+
+def freeze_model(model):
+    for parameter in model.parameters():
+        parameter.requires_grad = False
 
 
 def compare_optimizers(model, loss_fn, optimizers, train_loader, val_loader=None, schedulers=None, layers_to_hook='', n_epochs=50):

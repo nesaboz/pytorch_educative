@@ -34,6 +34,7 @@ def download_to_colab(project_name, branch='main'):
         os.makedirs(folder, exist_ok=True)
         url = os.path.join(root_url, filepath)
         r = requests.get(url, allow_redirects=True)
+        print(f'Updating {filepath}')
         open(filepath, 'wb').write(r.content)
 
 
