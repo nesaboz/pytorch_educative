@@ -116,9 +116,15 @@ class StepByStep(object):
         suffix = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
         self.writer = SummaryWriter(f'{folder}/{name}_{suffix}')
 
+    def check_consistency(self):
+        assert len(list(self.model.parameters())) == sum(
+            [len(param_group['params']) for param_group in self.optimizer.param_groups])
+
     def train(self, n_epochs):
 
         self.set_seed()
+
+        self.check_consistency()
 
         for epoch in tqdm(range(n_epochs)):
             self.total_epochs += 1
@@ -618,11 +624,7 @@ class StepByStep(object):
                 self.learning_rates.append(current_lr)
 
     def print_trainable_parameters(self):
-        names = [name for name, param in self.model.named_parameters() if param.requires_grad]
-        if names:
-            print("\n".join(names))
-        else:
-            print('No trainable parameters.')
+        print_trainable_parameters(self.model)
 
     def make_dot(self):
         x, y = next(iter(self.val_loader))
@@ -662,6 +664,14 @@ def unfreeze_model(model):
 def freeze_model(model):
     for parameter in model.parameters():
         parameter.requires_grad = False
+
+
+def print_trainable_parameters(model):
+    names = [name for name, param in model.named_parameters() if param.requires_grad]
+    if names:
+        print("\n".join(names))
+    else:
+        print('No trainable parameters.')
 
 
 def compare_optimizers(model, loss_fn, optimizers, train_loader, val_loader=None, schedulers=None, layers_to_hook='', n_epochs=50):
