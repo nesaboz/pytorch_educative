@@ -1,5 +1,5 @@
 name: Graphviz CI
-on: [push]
+on: []  # do not run for now
 jobs:
   test:
     runs-on: ubuntu-latest
