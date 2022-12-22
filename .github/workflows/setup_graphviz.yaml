@@ -1,5 +1,5 @@
 name: Graphviz CI
-on: []  # do not run for now
+on: [workflow_dispatch, pull_request]  # do not run for now
 jobs:
   test:
     runs-on: ubuntu-latest
