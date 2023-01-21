@@ -5,5 +5,9 @@ website:
       - 01_linear_regression.ipynb
       - 02_quadratic_function_fit.ipynb
       - 03_binary_classification.ipynb
-      - 04_binary_image_classification.ipynb
+      - 04_1_binary_image_classification.ipynb
+      - 04_2_torchvision_conversions_samplers.ipynb
       - 05_multiclass_image_classification.ipynb
+      - 06_rock_paper_scissors.ipynb
+      - 07_transfer_learning.ipynb
+      - 08_labeling.ipynb
