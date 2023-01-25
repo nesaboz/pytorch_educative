@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
+from PIL import Image
 import datetime
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.transforms import Normalize
@@ -31,6 +32,33 @@ def make_lr_fn(start_lr, end_lr, num_iter, step_mode='exp'):
     return lr_fn
 
 
+def get_means_and_stdevs(images, labels, include_out_of_bounds=True):
+    assert images.dim() == 4
+    assert labels.dim() == 3
+    tensor_flatten = images.flatten(2, 3)
+    labels_flatten = labels.flatten(1, 2)
+    (n_samples, n_channels) = tensor_flatten.shape[:2]
+
+    if include_out_of_bounds:
+        # Computes statistics of each image per channel
+        # Average pixel value per channel will produce (n_samples, n_channels)
+        means = tensor_flatten.mean(axis=2)
+        # Standard deviation of pixel values per channel
+        # (n_samples, n_channels)
+        stdevs = tensor_flatten.std(axis=2)
+    else:
+        # the following ended up giving very similar results as above
+        means = torch.zeros(n_samples, n_channels)
+        stdevs = torch.zeros(n_samples, n_channels)
+        for i in range(n_samples):
+            for j in range(n_channels):
+                array_per_image_per_channel = tensor_flatten[i, j, :]
+                array_per_image_per_channel = array_per_image_per_channel[labels_flatten[i, :] >= 0]
+                means[i, j] = array_per_image_per_channel.mean()
+                stdevs[i, j] = array_per_image_per_channel.std()
+    return means, stdevs
+
+
 class StepByStep(object):
     """
     Main class for training neural network.
@@ -53,6 +81,7 @@ class StepByStep(object):
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
         self.model.to(self.device)
+        self.loss_fn.to(self.device)
 
         self.train_loader = None
         self.val_loader = None
@@ -65,6 +94,8 @@ class StepByStep(object):
         self.losses = []
         self.val_losses = []
         self.learning_rates = []
+
+        self.metric = None
 
         self.visualization = {}
         self.handles = {}
@@ -85,7 +116,7 @@ class StepByStep(object):
         batch_y = batch_y.to(self.device)
 
         predictions = self.model(batch_x)
-        loss = self.loss_fn(predictions, batch_y)  # order is critical ofcourse, first are predictions then true labels.
+        loss = self.loss_fn(predictions, batch_y)  # note the order, first are predictions then true labels.
         loss.backward()
 
         self.optimizer.step()
@@ -158,9 +189,10 @@ class StepByStep(object):
         Passes x though the model to get predictions.
 
         Args:
-            x:
+            x (list, tuple, NumPy ``ndarray``, scalar, and other types)
 
-        Returns: self.model(x)
+        Returns:
+            self.model(x)
 
         """
 
@@ -168,10 +200,8 @@ class StepByStep(object):
         # need to evaluate
         prediction = self.model(torch.as_tensor(x).float().to(self.device))
         self.model.train()
-        if to_numpy:
-            return prediction.detach().cpu().numpy()
-        else:
-            return prediction
+        predict = prediction.detach().cpu()
+        return predict.numpy() if to_numpy else predict
 
     def plot_losses(self):
         fig = plt.figure(figsize=(10, 4))
@@ -191,6 +221,7 @@ class StepByStep(object):
             'optimizer_state_dict': self.optimizer.state_dict(),
             'losses': self.losses,
             'val_losses': self.val_losses,
+            'metric': self.metric
             }
 
         torch.save(checkpoint, filename)
@@ -248,6 +279,17 @@ class StepByStep(object):
             result.append((n_correct, n_class))
         return torch.tensor(result)
 
+    def get_metric(self, metric_fn):
+        val_loader = self.val_loader
+        val_loader_iter = iter(val_loader)
+        batch_metric = []
+        for x_val, y_val in tqdm(val_loader_iter):
+            y_pred = self.predict(x_val, to_numpy=False).argmax(1)
+            curr = metric_fn(y_pred, y_val, task="multiclass", num_classes=self.model.n_classes)
+            batch_metric.append(curr)
+        self.metric = np.array(batch_metric).mean()
+        return self.metric
+
     @staticmethod
     def loader_apply(loader, func, reduce='sum'):
         """
@@ -280,6 +322,7 @@ class StepByStep(object):
         try:
             self.train_loader.sampler.generator.manual_seed(seed)
         except AttributeError:
+            print("Failed to set loader seed.")
             pass
 
     def count_parameters(self):
@@ -487,27 +530,18 @@ class StepByStep(object):
                             [ 3.9893,  3.9119,  3.6910]])
 
         """
-        if len(images.shape) < 4:
+        if images.dim() < 4:
             # this means there is only one image so n_samples = 1
             images = torch.unsqueeze(images, 0)
 
         # NCHW
         n_samples, n_channels, n_height, n_weight = images.size()
-        # Flatten HW into a single dimension
-        flatten_per_channel = images.reshape(n_samples, n_channels, -1)
-
-        # Computes statistics of each image per channel
-        # Average pixel value per channel
-        # (n_samples, n_channels)
-        means = flatten_per_channel.mean(axis=2)
-        # Standard deviation of pixel values per channel
-        # (n_samples, n_channels)
-        stds = flatten_per_channel.std(axis=2)
+        means, stdevs = get_means_and_stdevs(images, labels)
 
         # Adds up statistics of all images in a mini-batch
         # (1, n_channels)
         sum_means = means.sum(axis=0)
-        sum_stds = stds.sum(axis=0)
+        sum_stds = stdevs.sum(axis=0)
         # Makes a tensor of shape (1, n_channels)
         # with the number of samples in the mini-batch
         n_samples = torch.tensor([n_samples] * n_channels).float()
@@ -525,8 +559,6 @@ class StepByStep(object):
                  tensor([541.4397, 492.6389, 484.5458]))
         to get a normalizer.
 
-        Args:
-            loader:
 
         Returns:
             Normalizer
@@ -782,6 +814,17 @@ def compare_optimizers(model, loss_fn, optimizers, train_loader, val_loader=None
     return results
 
 
+def load_tensor(paths, n_channels, transform, squeeze=True):
+    h, w = Image.open(paths[0]).size
+    tensor = torch.zeros([len(paths), n_channels, h, w])
+    for i, path in enumerate(tqdm(paths)):
+        img = Image.open(path)
+        tensor[i, :, :, :] = transform(img)
+    if squeeze:
+        tensor = tensor.squeeze()
+    return tensor
+
+
 class InverseNormalize(Normalize):
     """
     Undoes the normalization and returns the reconstructed images in the input domain.
@@ -810,6 +853,6 @@ def rescale(x):
     """
     rescaled_x = torch.clone(x)
     for i in range(x.shape[0]):
-        rescaled_x[i,:,:] = rescaled_x[i,:,:] - rescaled_x[i,:,:].min()
-        rescaled_x[i,:,:] = rescaled_x[i,:,:] / rescaled_x[i,:,:].max()
+        rescaled_x[i, :, :] = rescaled_x[i, :, :] - rescaled_x[i, :, :].min()
+        rescaled_x[i, :, :] = rescaled_x[i, :, :] / rescaled_x[i, :, :].max()
     return rescaled_x
