@@ -11,3 +11,5 @@ website:
       - 06_rock_paper_scissors.ipynb
       - 07_transfer_learning.ipynb
       - 08_labeling.ipynb
+      - 09_bear_classifier.ipynb
+

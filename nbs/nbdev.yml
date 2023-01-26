@@ -4,6 +4,6 @@ project:
 website:
   title: "pytorched"
   site-url: "https://nesaboz.github.io/pytorched"
-  description: "Following pytorch educative course (https://www.educative.io/courses/deep-learning-pytorch-fundamentals)"
+  description: "My PyTorch projects"
   repo-branch: main
   repo-url: "https://github.com/nesaboz/pytorched"
